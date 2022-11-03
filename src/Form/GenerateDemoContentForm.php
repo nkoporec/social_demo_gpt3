@@ -60,18 +60,54 @@ class GenerateDemoContentForm extends FormBase {
   public function buildForm(array $form, FormStateInterface $form_state, $default_ip = '') {
     $form = [];
 
+    $form['method'] = [
+      '#type' => 'radios',
+      '#title' => t('Method'),
+      '#options' => ['manual' => 'Manual', 'automatic' => 'Automatic'],
+      '#default_value' => 'Manual',
+      '#required' => TRUE,
+    ];
+
     $form["company_name"] = [
       "#type" => "textfield",
       "#title" => $this->t("Company name"),
       "#description" => $this->t("eq: Open Social"),
-      "#required" => TRUE,
+      '#states' => [
+        'visible' => [
+          ':input[name="method"]' => ['value' => 'manual'],
+        ],
+        'required' => [
+          ':input[name="method"]' => ['value' => 'manual'],
+        ],
+      ],
     ];
 
     $form["company_description"] = [
       "#type" => "textfield",
       "#title" => $this->t("Company description"),
       "#description" => $this->t("eq: The Community Engagement Platform"),
-      "#required" => TRUE,
+      '#states' => [
+        'visible' => [
+          ':input[name="method"]' => ['value' => 'manual'],
+        ],
+        'required' => [
+          ':input[name="method"]' => ['value' => 'manual'],
+        ],
+      ],
+    ];
+
+    $form["website_url"] = [
+      "#type" => "url",
+      "#title" => $this->t("Company page"),
+      "#description" => $this->t("The page you want to crawl for information for example https://www.getopensocial.com"),
+      '#states' => [
+        'visible' => [
+          ':input[name="method"]' => ['value' => 'automatic'],
+        ],
+        'required' => [
+          ':input[name="method"]' => ['value' => 'automatic'],
+        ],
+      ],
     ];
 
     $form["submit"] = [
@@ -86,8 +122,17 @@ class GenerateDemoContentForm extends FormBase {
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state) {
-    $company_name = $form_state->getValue("company_name");
-    $company_description = $form_state->getValue("company_description");
+    $method = $form_state->getValue("method");
+
+    if ($method === 'manual') {
+      $company_name = $form_state->getValue("company_name");
+      $company_description = $form_state->getValue("company_description");
+    }
+    elseif ($method === 'automatic') {
+      $company_url = $form_state->getValue("website_url");
+      $response = $this->getOneAIData($company_url);
+    }
+
     $users = $this->entityTypeManager->getStorage("user")->loadByProperties();
 
     // Post generation.
@@ -246,6 +291,43 @@ class GenerateDemoContentForm extends FormBase {
       curl_close($ch);
       $error = curl_error($ch);
       $this->messenger()->addError("GPT3 returned an error: $error");
+      return;
+    }
+
+    curl_close($ch);
+    $response = json_decode($result);
+
+    return $response;
+  }
+
+  /**
+   * Get AI data.
+   */
+  public function getOneAIData(string $prompt) {
+    $api_key = Settings::get('oneai_api_key', '');
+    $ch = curl_init();
+
+    curl_setopt($ch, CURLOPT_URL, 'https://api.oneai.com/api/v0/pipeline');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, "{\"input\":\"" . $prompt . "\",\"input_type\":\"article\",\"output_type\":\"json\",\"steps\":[{\"skill\":\"html-extract-article\"},{\"skill\":\"summarize\"},{\"skill\":\"article-topics\"},{\"skill\":\"keywords\"}]}");
+
+    $headers = [];
+    $headers[] = 'Content-Type: application/json';
+    $headers[] = 'api-key: ' . $api_key;
+
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+    $result = curl_exec($ch);
+    if (curl_errno($ch)) {
+      throw new \Exception(curl_error($ch));
+    }
+
+    $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    if ($http_status != 200) {
+      curl_close($ch);
+      $error = curl_error($ch);
+      $this->messenger()->addError("OneAI returned an error: $error");
       return;
     }
 
