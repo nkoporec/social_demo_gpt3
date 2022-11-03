@@ -1,0 +1,6 @@
+social_demo_gpt3.generate:
+  title: Generate GPT3 content
+  parent: system.admin_config_development
+  description: 'Generates demo content using GPT3.'
+  route_name: social_demo_gpt3.generate_demo
+  weight: -20

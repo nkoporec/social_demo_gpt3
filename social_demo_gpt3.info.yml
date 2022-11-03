@@ -1,0 +1,5 @@
+name: 'Social Demo GPT-3'
+type: module
+description: 'Provides GPT-3 demo content.'
+core_version_requirement: ^9
+package: Social

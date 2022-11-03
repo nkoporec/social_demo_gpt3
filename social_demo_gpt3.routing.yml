@@ -1,0 +1,7 @@
+social_demo_gpt3.generate_demo:
+  path: '/admin/config/development/social-demo-gpt3/generate'
+  defaults:
+    _form: '\Drupal\social_demo_gpt3\Form\GenerateDemoContentForm'
+    _title: 'Generate demo content'
+  requirements:
+    _role: "administrator"
