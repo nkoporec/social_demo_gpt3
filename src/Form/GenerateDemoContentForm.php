@@ -131,13 +131,18 @@ class GenerateDemoContentForm extends FormBase {
     elseif ($method === 'automatic') {
       $company_url = $form_state->getValue("website_url");
       $response = $this->getOneAIData($company_url);
+      $summary = $response->output[1]->contents[0]->utterance;
     }
 
     $users = $this->entityTypeManager->getStorage("user")->loadByProperties();
 
     // Post generation.
     $i = 0;
-    $post_prompt = "Write a user post about company $company_name which is $company_description to be published on a social network";
+    if ($method === 'manual') {
+      $post_prompt = "Write a user post about company $company_name which is $company_description to be published on a social network";
+    } elseif ($method === 'automatic') {
+      $post_prompt = "Write a user post about $summary to be published on a social network";
+    }
     $api_key = Settings::get('openai_gpt3_api_key', '');
     if (!$api_key) {
       $this->messenger()->addMessage("No Open AI GPT3 api key found, please add it to your setting.php file.");
@@ -170,7 +175,11 @@ class GenerateDemoContentForm extends FormBase {
 
     // Event generations.
     $i = 0;
-    $event_title_prompt = "Create an event title about company $company_description or about company $company_name to be published on a social network";
+    if ($method === 'manual') {
+      $event_title_prompt = "Create an event title about company $company_description or about company $company_name to be published on a social network";
+    } elseif ($method === 'automatic') {
+      $event_title_prompt = "Create an event title about $summary to be published on a social network";
+    }
     $gpt_events = [];
 
     // First create titles.
@@ -218,7 +227,11 @@ class GenerateDemoContentForm extends FormBase {
 
     // Topic generations.
     $i = 0;
-    $topic_title_prompt = "Create an topic title about company $company_description or about company $company_name to be published on a social network";
+    if ($method === 'manual') {
+      $topic_title_prompt = "Create an topic title about company $company_description or about company $company_name to be published on a social network";
+    } elseif ($method === 'automatic') {
+      $topic_title_prompt = "Create an topic title about $summary to be published on a social network";
+    }
     $gpt_topics = [];
 
     // First create titles.
