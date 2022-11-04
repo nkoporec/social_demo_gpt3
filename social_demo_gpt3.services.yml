@@ -1,0 +1,4 @@
+services:
+  social_demo_gpt3.client:
+    class: Drupal\social_demo_gpt3\Gpt3Client
+    arguments: []

@@ -7,6 +7,7 @@ use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Drupal\Core\Site\Settings;
+use Drupal\social_demo_gpt3\Gpt3Client;
 
 /**
  * Generates demo content based on GPT3.
@@ -23,10 +24,18 @@ class GenerateDemoContentForm extends FormBase {
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
+   * The GPT3 client.
+   *
+   * @var \Drupal\social_demo_gpt3\Gpt3Client
+   */
+  protected Gpt3Client $gpt3Client;
+
+  /**
    * Constructs a new GenerateDemoContentForm object.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, Gpt3Client $gpt3_client) {
     $this->entityTypeManager = $entity_type_manager;
+    $this->gpt3Client = $gpt3_client;
   }
 
   /**
@@ -34,7 +43,8 @@ class GenerateDemoContentForm extends FormBase {
    */
   public static function create(ContainerInterface $container) {
     return new self(
-      $container->get('entity_type.manager')
+      $container->get('entity_type.manager'),
+      $container->get('social_demo_gpt3.client')
     );
   }
 
@@ -133,293 +143,77 @@ class GenerateDemoContentForm extends FormBase {
     }
     elseif ($method === 'automatic') {
       $company_url = $form_state->getValue("website_url");
-      $response = $this->getOneAIData($company_url);
+      $response = $this->gpt3Client->getOneAiData($company_url);
       $summary = $response->output[1]->contents[0]->utterance;
     }
 
     $users = $this->entityTypeManager->getStorage("user")->loadByProperties();
 
-    // Post generation.
-    $i = 0;
-    if ($method === 'manual') {
-      $post_prompt = "Write a user post about company $company_name which is $company_description to be published on a social network";
-    }
-    elseif ($method === 'automatic') {
-      $post_prompt = "Write a user post about $summary to be published on a social network";
-    }
+    $batch = [
+      'title' => $this->t('Creating AI content ...'),
+      'operations' => [],
+      'init_message'     => $this->t('Booting up the robots ...'),
+      'progress_message' => $this->t('Processed @current out of @total.'),
+      'error_message'    => $this->t('An error occurred during processing'),
+      'finished' => '\Drupal\social_demo_gpt3\GenerateContentService::finishedCallback',
+    ];
+
     $api_key = Settings::get('openai_gpt3_api_key', '');
     if (!$api_key) {
       $this->messenger()->addMessage("No Open AI GPT3 api key found, please add it to your setting.php file.");
       return;
     }
 
-    $gpt_posts = [];
+    // Post generation.
+    $i = 0;
     while ($i < 3) {
-      $ai_response = $this->getGpt3Data($post_prompt);
-
-      foreach ($ai_response->choices as $choice) {
-        $gpt_posts[] = str_replace("\n", "", $choice->text);
-      }
+      $batch['operations'][] = [
+        '\Drupal\social_demo_gpt3\GenerateGpt3Content::generatePostContent',
+        [
+          $method,
+          $company_name,
+          $company_description,
+          $summary,
+          $users,
+        ],
+      ];
 
       $i++;
     }
-
-    foreach ($gpt_posts as $post) {
-      $post = $this->entityTypeManager->getStorage("post")->create([
-        "user_id" => $users[array_rand($users)]->id(),
-        "status" => 1,
-        "type" => "photo",
-        "langcode" => "en",
-        "field_post" => $post,
-        "field_visibility" => 2,
-      ]);
-
-      if ($method === 'manual') {
-        $image = $this->getGpt3Image("A random image to be published on social network");
-      }
-      elseif ($method === 'automatic') {
-        $image = $this->getGpt3Image("An image about topic $summary to be published on social network");
-      }
-
-      if ($image) {
-        $post->set("field_post_image", ["target_id" => $image->id()]);
-      }
-
-      $post->save();
-    }
-
-    $this->messenger()->addMessage("GPT3 successfully generated post content.");
 
     // Event generations.
     $i = 0;
-    if ($method === 'manual') {
-      $event_title_prompt = "Create an event title about company $company_description or about company $company_name to be published on a social network";
-    }
-    elseif ($method === 'automatic') {
-      $event_title_prompt = "Create an event title about $summary to be published on a social network";
-    }
-    $gpt_events = [];
-
-    // First create titles.
-    while ($i < 5) {
-      $ai_response = $this->getGpt3Data($event_title_prompt);
-
-      foreach ($ai_response->choices as $choice) {
-        $event_title = str_replace("\n", "", $choice->text);
-        $gpt_events[$event_title] = "";
-      }
+    while ($i < 3) {
+      $batch['operations'][] = [
+        '\Drupal\social_demo_gpt3\GenerateGpt3Content::generateNodeContent',
+        [
+          "event",
+          $method,
+          $summary,
+          $users,
+        ],
+      ];
 
       $i++;
-    }
-
-    foreach ($gpt_events as $title => $text) {
-      $event_description_prompt = "Create event description for title $title to be published on a social network";
-      $ai_response = $this->getGpt3Data($event_description_prompt);
-
-      foreach ($ai_response->choices as $choice) {
-        $event_description = str_replace("\n", "", $choice->text);
-        $gpt_events[$title] = $event_description;
-      }
-    }
-
-    // Create nodes.
-    foreach ($gpt_events as $title => $description) {
-      /** @var \Drupal\node\NodeInterface $node */
-      $node = $this->entityTypeManager->getStorage('node')
-        ->create([
-          "type" => "event",
-          "title" => $title,
-        ]);
-
-      $node->set('body', $description);
-      $node->body->format = 'full_html';
-
-      $node->set('field_event_date', date('Y-m-d', strtotime("2030-10-10")));
-      $node->set('field_event_date_end', date('Y-m-d', strtotime("2030-11-10")));
-
-      $image = $this->getGpt3Image("An image about event $title to be published on social network");
-      if ($image) {
-        $node->set("field_event_image", ["target_id" => $image->id()]);
-      }
-
-      $node->setOwnerId($users[array_rand($users)]->id());
-      $node->setPublished();
-
-      $node->save();
     }
 
     // Topic generations.
     $i = 0;
-    if ($method === 'manual') {
-      $topic_title_prompt = "Create an topic title about company $company_description or about company $company_name to be published on a social network";
-    }
-    elseif ($method === 'automatic') {
-      $topic_title_prompt = "Create an topic title about $summary to be published on a social network";
-    }
-    $gpt_topics = [];
-
-    // First create titles.
-    while ($i < 5) {
-      $ai_response = $this->getGpt3Data($topic_title_prompt);
-
-      foreach ($ai_response->choices as $choice) {
-        $topic_title = str_replace("\n", "", $choice->text);
-        $gpt_topics[$topic_title] = "";
-      }
+    while ($i < 3) {
+      $batch['operations'][] = [
+        '\Drupal\social_demo_gpt3\GenerateGpt3Content::generateNodeContent',
+        [
+          "topic",
+          $method,
+          $summary,
+          $users,
+        ],
+      ];
 
       $i++;
     }
 
-    foreach ($gpt_topics as $title => $text) {
-      $topic_description_prompt = "Create topic description for title $title to be published on a social network";
-      $ai_response = $this->getGpt3Data($topic_description_prompt);
-
-      foreach ($ai_response->choices as $choice) {
-        $topic_description = str_replace("\n", "", $choice->text);
-        $gpt_topics[$title] = $topic_description;
-      }
-    }
-
-    // Create nodes.
-    foreach ($gpt_topics as $title => $description) {
-      /** @var \Drupal\node\NodeInterface $node */
-      $node = $this->entityTypeManager->getStorage('node')
-        ->create([
-          "type" => "topic",
-          "title" => $title,
-        ]);
-
-      $node->set('body', $description);
-      $node->body->format = 'full_html';
-
-      $image = $this->getGpt3Image("An image about topic $title to be published on social network");
-      if ($image) {
-        $node->set("field_topic_image", ["target_id" => $image->id()]);
-      }
-
-      $node->setOwnerId($users[array_rand($users)]->id());
-      $node->setPublished();
-
-      $node->save();
-    }
-
-  }
-
-  /**
-   * Get AI text data.
-   */
-  public function getGpt3Data(string $prompt) {
-    $api_key = Settings::get('openai_gpt3_api_key', '');
-    $ch = curl_init();
-
-    curl_setopt($ch, CURLOPT_URL, 'https://api.openai.com/v1/completions');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_POST, 1);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, "{\n  \"model\": \"text-davinci-002\",\n  \"prompt\": \"" . $prompt . "n\",\n  \"temperature\": 1,\n  \"max_tokens\": 1301,\n  \"top_p\": 1,\n  \"frequency_penalty\": 0,\n  \"presence_penalty\": 0\n}");
-
-    $headers = [];
-    $headers[] = 'Content-Type: application/json';
-    $headers[] = 'Authorization: Bearer ' . $api_key;
-
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-      throw new \Exception(curl_error($ch));
-    }
-
-    $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    if ($http_status != 200) {
-      curl_close($ch);
-      $error = curl_error($ch);
-      $this->messenger()->addError("GPT3 returned an error: $error");
-      return NULL;
-    }
-
-    curl_close($ch);
-    $response = json_decode($result);
-
-    return $response;
-  }
-
-  /**
-   * Get AI image.
-   */
-  public function getGpt3Image(string $prompt) {
-    $api_key = Settings::get('openai_gpt3_api_key', '');
-    $ch = curl_init();
-
-    curl_setopt($ch, CURLOPT_URL, 'https://api.openai.com/v1/images/generations');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_POST, 1);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, "{\n    \"prompt\": \"" . $prompt . "\",\n    \"n\": 1,\n    \"size\": \"1024x1024\"\n  }");
-
-    $headers = [];
-    $headers[] = 'Content-Type: application/json';
-    $headers[] = 'Authorization: Bearer ' . $api_key;
-
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-      throw new \Exception(curl_error($ch));
-    }
-
-    $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    if ($http_status != 200) {
-      curl_close($ch);
-      $error = curl_error($ch);
-      $this->messenger()->addError("GPT3 returned an error: $error");
-      return NULL;
-    }
-
-    curl_close($ch);
-    $response = json_decode($result);
-
-    $dall_e_image = end($response->data);
-    $dall_e_image_url = $dall_e_image->url;
-
-    /** @var \Drupal\file\FileInterface $local_img */
-    $local_img = system_retrieve_file($dall_e_image_url, "public://", TRUE);
-
-    return $local_img;
-  }
-
-  /**
-   * Get AI data.
-   */
-  public function getOneAIData(string $prompt) {
-    $api_key = Settings::get('oneai_api_key', '');
-    $ch = curl_init();
-
-    curl_setopt($ch, CURLOPT_URL, 'https://api.oneai.com/api/v0/pipeline');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_POST, 1);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, "{\"input\":\"" . $prompt . "\",\"input_type\":\"article\",\"output_type\":\"json\",\"steps\":[{\"skill\":\"html-extract-article\"},{\"skill\":\"summarize\"},{\"skill\":\"article-topics\"},{\"skill\":\"keywords\"}]}");
-
-    $headers = [];
-    $headers[] = 'Content-Type: application/json';
-    $headers[] = 'api-key: ' . $api_key;
-
-    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-
-    $result = curl_exec($ch);
-    if (curl_errno($ch)) {
-      throw new \Exception(curl_error($ch));
-    }
-
-    $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    if ($http_status != 200) {
-      curl_close($ch);
-      $error = curl_error($ch);
-      $this->messenger()->addError("OneAI returned an error: $error");
-      return;
-    }
-
-    curl_close($ch);
-    $response = json_decode($result);
-
-    return $response;
+    batch_set($batch);
   }
 
 }
