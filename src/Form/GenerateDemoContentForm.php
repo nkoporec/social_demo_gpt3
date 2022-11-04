@@ -123,6 +123,13 @@ class GenerateDemoContentForm extends FormBase {
       ],
     ];
 
+    $form["number_of_items"] = [
+      "#type" => "number",
+      "#title" => $this->t("Number of items"),
+      "#description" => $this->t("How much content should we generate for each type."),
+      "#default_value" => 3,
+    ];
+
     $form["submit"] = [
       "#type" => "submit",
       "#value" => $this->t("Save"),
@@ -136,6 +143,7 @@ class GenerateDemoContentForm extends FormBase {
    */
   public function submitForm(array &$form, FormStateInterface $form_state) {
     $method = $form_state->getValue("method");
+    $number_of_items = $form_state->getValue("number_of_items");
 
     if ($method === 'manual') {
       $company_name = $form_state->getValue("company_name");
@@ -166,7 +174,7 @@ class GenerateDemoContentForm extends FormBase {
 
     // Post generation.
     $i = 0;
-    while ($i < 3) {
+    while ($i < $number_of_items) {
       $batch['operations'][] = [
         '\Drupal\social_demo_gpt3\GenerateGpt3Content::generatePostContent',
         [
@@ -183,7 +191,7 @@ class GenerateDemoContentForm extends FormBase {
 
     // Event generations.
     $i = 0;
-    while ($i < 3) {
+    while ($i < $number_of_items) {
       $batch['operations'][] = [
         '\Drupal\social_demo_gpt3\GenerateGpt3Content::generateNodeContent',
         [
@@ -191,6 +199,8 @@ class GenerateDemoContentForm extends FormBase {
           $method,
           $summary,
           $users,
+          $company_name,
+          $company_description,
         ],
       ];
 
@@ -199,7 +209,7 @@ class GenerateDemoContentForm extends FormBase {
 
     // Topic generations.
     $i = 0;
-    while ($i < 3) {
+    while ($i < $number_of_items) {
       $batch['operations'][] = [
         '\Drupal\social_demo_gpt3\GenerateGpt3Content::generateNodeContent',
         [
@@ -207,6 +217,8 @@ class GenerateDemoContentForm extends FormBase {
           $method,
           $summary,
           $users,
+          $company_name,
+          $company_description,
         ],
       ];
 

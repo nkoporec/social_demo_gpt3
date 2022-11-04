@@ -28,7 +28,7 @@ class GenerateGpt3Content {
     $gpt3_client = \Drupal::service('social_demo_gpt3.client');
 
     if ($method === 'manual') {
-      $prompt = "Write a user post about company $company_name which is $company_description to be published on a social network";
+      $prompt = "Write a user post about company $company_name which and $company_description to be published on a social network";
     }
     elseif ($method === 'automatic') {
       $prompt = "Write a user post about $summary to be published on a social network";
@@ -77,15 +77,19 @@ class GenerateGpt3Content {
    *   AI website summary.
    * @param array $users
    *   Users.
+   * @param string $company_name
+   *   Company name.
+   * @param string $company_description
+   *   Company description.
    * @param object $context
    *   Batch context.
    */
-  public static function generateNodeContent($type, $method, $summary, array $users, &$context) {
+  public static function generateNodeContent($type, $method, $summary, array $users, $company_name, $company_description, &$context) {
     /** @var \Drupal\social_demo_gpt3\Gpt3Client $gpt3_client */
     $gpt3_client = \Drupal::service('social_demo_gpt3.client');
 
     if ($method === 'manual') {
-      $prompt = "Create an $type title about company $company_description or about company $company_name to be published on a social network";
+      $prompt = "Create an $type title about $company_name and $company_description to be published on a social network";
     }
     elseif ($method === 'automatic') {
       $prompt = "Create an $type title about $summary to be published on a social network";
