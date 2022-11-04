@@ -41,13 +41,13 @@ class GenerateGpt3Content {
       $gpt_posts[] = str_replace("\n", "", $choice->text);
     }
 
-    foreach ($gpt_posts as $post) {
+    foreach ($gpt_posts as $post_text) {
       $post = \Drupal::entityTypeManager()->getStorage("post")->create([
         "user_id" => $users[array_rand($users)]->id(),
         "status" => 1,
         "type" => "photo",
         "langcode" => "en",
-        "field_post" => $post,
+        "field_post" => $post_text,
         "field_visibility" => 2,
       ]);
 
@@ -63,6 +63,35 @@ class GenerateGpt3Content {
       }
 
       $post->save();
+
+      // Randomly seed comments.
+      if (mt_rand(0, 1)) {
+        $i = 0;
+        $number_of_comments = rand(1, 3);
+        while ($i < $number_of_comments) {
+          $comment_prompt = "Write a comment about how great a post on this social network was.";
+          $ai_response = $gpt3_client->getGpt3Data($comment_prompt);
+          foreach ($ai_response->choices as $choice) {
+            $comment_body = str_replace("\n", "", $choice->text);
+            $comment = \Drupal::entityTypeManager()->getStorage("comment")->create([
+              'entity_type' => 'post',
+              'entity_id'   => $post->id(),
+              'field_name'  => 'field_post_comments',
+              'uid' => $users[array_rand($users)]->id(),
+              'comment_type' => 'post_comment',
+              'subject' => 'wow',
+              'status' => 1,
+            ]);
+
+            $comment->set('field_comment_body', $comment_body);
+            $comment->field_comment_body->format = 'full_html';
+            $comment->save();
+          }
+
+          $i++;
+        }
+      }
+
     }
   }
 
