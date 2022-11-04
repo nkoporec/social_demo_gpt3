@@ -62,9 +62,12 @@ class GenerateDemoContentForm extends FormBase {
 
     $form['method'] = [
       '#type' => 'radios',
-      '#title' => t('Method'),
-      '#options' => ['manual' => 'Manual', 'automatic' => 'Automatic'],
-      '#default_value' => 'Manual',
+      '#title' => $this->t('Method'),
+      '#options' => [
+        'manual' => $this->t('Manual'),
+        'automatic' => $this->t('Automatic'),
+      ],
+      '#default_value' => 'manual',
       '#required' => TRUE,
     ];
 
@@ -140,7 +143,8 @@ class GenerateDemoContentForm extends FormBase {
     $i = 0;
     if ($method === 'manual') {
       $post_prompt = "Write a user post about company $company_name which is $company_description to be published on a social network";
-    } elseif ($method === 'automatic') {
+    }
+    elseif ($method === 'automatic') {
       $post_prompt = "Write a user post about $summary to be published on a social network";
     }
     $api_key = Settings::get('openai_gpt3_api_key', '');
@@ -150,7 +154,7 @@ class GenerateDemoContentForm extends FormBase {
     }
 
     $gpt_posts = [];
-    while ($i < 5) {
+    while ($i < 3) {
       $ai_response = $this->getGpt3Data($post_prompt);
 
       foreach ($ai_response->choices as $choice) {
@@ -161,14 +165,27 @@ class GenerateDemoContentForm extends FormBase {
     }
 
     foreach ($gpt_posts as $post) {
-      $this->entityTypeManager->getStorage("post")->create([
+      $post = $this->entityTypeManager->getStorage("post")->create([
         "user_id" => $users[array_rand($users)]->id(),
         "status" => 1,
-        "type" => "post",
+        "type" => "photo",
         "langcode" => "en",
         "field_post" => $post,
         "field_visibility" => 2,
-      ])->save();
+      ]);
+
+      if ($method === 'manual') {
+        $image = $this->getGpt3Image("A random image to be published on social network");
+      }
+      elseif ($method === 'automatic') {
+        $image = $this->getGpt3Image("An image about topic $summary to be published on social network");
+      }
+
+      if ($image) {
+        $post->set("field_post_image", ["target_id" => $image->id()]);
+      }
+
+      $post->save();
     }
 
     $this->messenger()->addMessage("GPT3 successfully generated post content.");
@@ -177,7 +194,8 @@ class GenerateDemoContentForm extends FormBase {
     $i = 0;
     if ($method === 'manual') {
       $event_title_prompt = "Create an event title about company $company_description or about company $company_name to be published on a social network";
-    } elseif ($method === 'automatic') {
+    }
+    elseif ($method === 'automatic') {
       $event_title_prompt = "Create an event title about $summary to be published on a social network";
     }
     $gpt_events = [];
@@ -219,6 +237,11 @@ class GenerateDemoContentForm extends FormBase {
       $node->set('field_event_date', date('Y-m-d', strtotime("2030-10-10")));
       $node->set('field_event_date_end', date('Y-m-d', strtotime("2030-11-10")));
 
+      $image = $this->getGpt3Image("An image about event $title to be published on social network");
+      if ($image) {
+        $node->set("field_event_image", ["target_id" => $image->id()]);
+      }
+
       $node->setOwnerId($users[array_rand($users)]->id());
       $node->setPublished();
 
@@ -229,7 +252,8 @@ class GenerateDemoContentForm extends FormBase {
     $i = 0;
     if ($method === 'manual') {
       $topic_title_prompt = "Create an topic title about company $company_description or about company $company_name to be published on a social network";
-    } elseif ($method === 'automatic') {
+    }
+    elseif ($method === 'automatic') {
       $topic_title_prompt = "Create an topic title about $summary to be published on a social network";
     }
     $gpt_topics = [];
@@ -268,6 +292,11 @@ class GenerateDemoContentForm extends FormBase {
       $node->set('body', $description);
       $node->body->format = 'full_html';
 
+      $image = $this->getGpt3Image("An image about topic $title to be published on social network");
+      if ($image) {
+        $node->set("field_topic_image", ["target_id" => $image->id()]);
+      }
+
       $node->setOwnerId($users[array_rand($users)]->id());
       $node->setPublished();
 
@@ -277,7 +306,7 @@ class GenerateDemoContentForm extends FormBase {
   }
 
   /**
-   * Get AI data.
+   * Get AI text data.
    */
   public function getGpt3Data(string $prompt) {
     $api_key = Settings::get('openai_gpt3_api_key', '');
@@ -304,13 +333,56 @@ class GenerateDemoContentForm extends FormBase {
       curl_close($ch);
       $error = curl_error($ch);
       $this->messenger()->addError("GPT3 returned an error: $error");
-      return;
+      return NULL;
     }
 
     curl_close($ch);
     $response = json_decode($result);
 
     return $response;
+  }
+
+  /**
+   * Get AI image.
+   */
+  public function getGpt3Image(string $prompt) {
+    $api_key = Settings::get('openai_gpt3_api_key', '');
+    $ch = curl_init();
+
+    curl_setopt($ch, CURLOPT_URL, 'https://api.openai.com/v1/images/generations');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, "{\n    \"prompt\": \"" . $prompt . "\",\n    \"n\": 1,\n    \"size\": \"1024x1024\"\n  }");
+
+    $headers = [];
+    $headers[] = 'Content-Type: application/json';
+    $headers[] = 'Authorization: Bearer ' . $api_key;
+
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+    $result = curl_exec($ch);
+    if (curl_errno($ch)) {
+      throw new \Exception(curl_error($ch));
+    }
+
+    $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    if ($http_status != 200) {
+      curl_close($ch);
+      $error = curl_error($ch);
+      $this->messenger()->addError("GPT3 returned an error: $error");
+      return NULL;
+    }
+
+    curl_close($ch);
+    $response = json_decode($result);
+
+    $dall_e_image = end($response->data);
+    $dall_e_image_url = $dall_e_image->url;
+
+    /** @var \Drupal\file\FileInterface $local_img */
+    $local_img = system_retrieve_file($dall_e_image_url, "public://", TRUE);
+
+    return $local_img;
   }
 
   /**
